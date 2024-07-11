@@ -661,6 +661,12 @@ static void route_repair_isobmf_mdat_box(ROUTEInCtx *ctx, RepairSegmentInfo *rsi
 		return;
 	}
 
+	if(! rsi->finfo.blob->use_sref) {
+		GF_LOG(GF_LOG_WARNING, GF_LOG_ROUTE, ("[REPAIR] Dependency graph cannot be constructed reliably and accurately; switching to full repair. \n", nb_ranges));
+		route_repair_build_ranges_full(ctx, rsi, &rsi->finfo);
+		return;
+	}
+
 	SampleRangeDependency* sorted_samples[nb_ranges];
 
 	route_repair_topological_sort_samples(rsi->srd, nb_ranges, sorted_samples);
