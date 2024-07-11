@@ -555,33 +555,38 @@ static u32 routein_repair_isobmf_frames(ROUTEInCtx *ctx, RepairSegmentInfo *rsi,
 
 static void route_repair_topological_sort_samples(SampleRangeDependency srd[], u32 nb_ranges, SampleRangeDependency* sorted_samples[]) {
 	
-	u32 i;
-	u32 j=0;
-	//look for intra images !
+	s32 i;
+	u32 j;
+	s32 sort_i = nb_ranges-1;
+	
+	int outgoings[nb_ranges];
+
+	//for each sample, count number of outgoing deps
 	for(i=0; i < nb_ranges; i++) {
-		srd[i].mark = 0;
-		if(srd[i].type == 1) {
-			sorted_samples[j] = &srd[i];
-			srd[i].mark = 1;
-			j++;
+		for(j=0; j < srd[i].nb_deps; j++) {
+			outgoings[srd[i].dep_ids[j]-1]++;
 		}
 	}
 
-	for(i=0; i<nb_ranges && i<j; i++) {
-		u32 k;
-		for(k=0; k < nb_ranges; k++) {
-			if (srd[k].nb_deps<=0) continue;
-			//TODO: loop on all deps ?
-			if (srd[k].dep_ids[0] == srd[i].id && !srd[k].mark) {
-				sorted_samples[j] = &srd[k];
-				srd[k].mark = 1;
-				j++;
+	//Kahn's algorithm for toological sort
+	//add leaves samples at the end of sorted_samples
+	for(i=0; i < nb_ranges; i++) {
+		if(outgoings[i] == 0) {
+			sorted_samples[sort_i] = &srd[i];
+			sort_i--;
+		}
+	}
+	
+	for(i=nb_ranges-1; i >= 0; i--) {
+		for(j=0; j < srd[i].nb_deps; j++) {
+			u32 sample_i = srd[i].dep_ids[j]-1;
+
+			outgoings[sample_i]--;
+			if(outgoings[sample_i] == 0) {
+				sorted_samples[sort_i] = &srd[sample_i];
+				sort_i--;
 			}
 		}
-	}
-
-	if(j < nb_ranges) {
-		GF_LOG(GF_LOG_WARNING, GF_LOG_ROUTE, ("[REPAIR] Problem in dependencies: not all samples are in sorted_samples (%u < %u) \n", j, nb_ranges));
 	}
 }
 
