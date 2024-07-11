@@ -1158,6 +1158,8 @@ typedef struct __gf_blob
 	GF_BlobRangeStatus (*range_valid)(struct __gf_blob *blob, u64 start, u32 *size);
 	/*! private data for range_valid function*/
 	void *range_udta;
+
+	Bool use_sref;
 } GF_Blob;
 
 /*!

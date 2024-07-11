@@ -78,9 +78,10 @@ static Bool routein_repair_get_isobmf_deps(const char *seg_name, GF_Blob *blob, 
 	u32 nb_levels=0;
 	u32 ID, nb_refs;
 	const u32 *refs;
-	Bool use_sref = GF_FALSE;
 	if (gf_isom_get_sample_references(file, 1, 1, &ID, &nb_refs, &refs)==GF_OK) {
-		use_sref = GF_TRUE;
+		blob->use_sref = GF_TRUE;
+	} else {
+		blob->use_sref = GF_FALSE;
 	}
 
 	for (i=0; i<count; i++) {
@@ -93,7 +94,7 @@ static Bool routein_repair_get_isobmf_deps(const char *seg_name, GF_Blob *blob, 
 		r->size = samp->dataLength;
 		r->offset = (u32) offset;
 
-		if (use_sref) {
+		if (blob->use_sref) {
 			gf_isom_get_sample_references(file, 1, i+1, &r->id, &r->nb_deps, &refs);
 			if (r->id==0xFFFFFFFF) {
 				r->nb_deps = -1;
