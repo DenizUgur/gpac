@@ -691,13 +691,13 @@ static void route_repair_isobmf_mdat_box(ROUTEInCtx *ctx, RepairSegmentInfo *rsi
 	
 	routein_repair_get_isobmf_deps(rsi->finfo.filename, rsi->finfo.blob, &rsi->srd, &nb_ranges);
 	if(! nb_ranges) {
-		GF_LOG(GF_LOG_WARNING, GF_LOG_ROUTE, ("[REPAIR] All samples have the same dependency level, switching to full repair \n", nb_ranges));
+		GF_LOG(GF_LOG_WARNING, GF_LOG_ROUTE, ("[REPAIR] All samples have the same dependency level in \"%s\", switching to full repair \n", rsi->finfo.filename));
 		route_repair_build_ranges_full(ctx, rsi, &rsi->finfo);
 		return;
 	}
 
 	if(! rsi->finfo.blob->use_sref) {
-		GF_LOG(GF_LOG_WARNING, GF_LOG_ROUTE, ("[REPAIR] Dependency graph cannot be constructed reliably and accurately; switching to full repair. \n", nb_ranges));
+		GF_LOG(GF_LOG_WARNING, GF_LOG_ROUTE, ("[REPAIR] Dependency graph cannot be constructed reliably and accurately; switching to full repair. \n"));
 		route_repair_build_ranges_full(ctx, rsi, &rsi->finfo);
 		return;
 	}
