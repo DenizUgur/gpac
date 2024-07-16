@@ -514,6 +514,55 @@ static void route_repair_build_ranges_isobmf(ROUTEInCtx *ctx, RepairSegmentInfo 
 	}
 }
 
+
+static void routein_repair_get_costs(RepairSegmentInfo *rsi, SampleRangeDependency *r, u32 threshold, u32 *nb_bytes, u32 *nb_requests) {
+// add byte ranges to "rsi->ranges" for repair
+	nb_requests = 0;
+	u32 last_br_end = 0, last_br_start = 0;
+	u32 i;
+
+	for (i=0; i<=rsi->finfo.nb_frags; i++) {
+		u32 br_start = 0, br_end = 0;
+		// first range
+		if (!i) {
+			br_end = rsi->finfo.frags[i].offset;
+		}
+		//middle ranges
+		else if (i < rsi->finfo.nb_frags) {
+			br_start = rsi->finfo.frags[i-1].offset + rsi->finfo.frags[i-1].size;
+			br_end = rsi->finfo.frags[i].offset;
+		}
+		//last range
+		else {
+			br_start = rsi->finfo.frags[rsi->finfo.nb_frags-1].offset + rsi->finfo.frags[rsi->finfo.nb_frags-1].size;
+			br_end = rsi->finfo.total_size;
+		}
+
+		//this was correctly received !
+		if (br_end <= br_start) continue;
+		//byte range is before sample range
+		if (br_end <= r->offset) continue;
+
+		if (br_end > r->offset && br_start < r->offset+r->size) {
+
+			if(last_br_start < last_br_end && br_start - last_br_end < threshold) {
+				last_br_end = br_end;
+			} else {
+				nb_bytes += last_br_end - last_br_start;
+
+				nb_requests++;
+				last_br_start = MAX(r->offset, br_start);
+				last_br_end = MIN(r->offset + r->size, br_end);
+			}
+		}
+		//byte range is after sample range
+		if (br_start >= r->offset + r->size) {
+			break;
+		}
+	}
+	nb_bytes += last_br_end - last_br_start;
+}
+
 static u32 routein_repair_isobmf_frames(ROUTEInCtx *ctx, RepairSegmentInfo *rsi, SampleRangeDependency *r, u32 threshold) {
 	// add byte ranges to "rsi->ranges" for repair
 	u32 nb_rr = 0;
