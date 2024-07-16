@@ -29,6 +29,30 @@
 #ifndef GPAC_DISABLE_ROUTE
 
 
+static void routein_repair_get_inverted_isobmf_deps(SampleRangeDependency *out_ranges, u32 nb_ranges) {
+	u32 i, j;
+
+	u32 indexes[nb_ranges];
+
+	for(i=0; i < nb_ranges; i++) {
+		for(j=0; j < out_ranges[i].nb_deps; j++) {
+			out_ranges[out_ranges[i].dep_ids[j]].nb_rev_deps++;
+		}
+	}
+	
+	for(i=0; i < nb_ranges; i++) {
+		out_ranges[i].rev_dep_ids = gf_malloc(sizeof(u32) * out_ranges[i].nb_rev_deps);
+		indexes[i] = 0;
+	}
+
+	for(i=0; i < nb_ranges; i++) {
+		for(j=0; j < out_ranges[i].nb_deps; j++) {
+			out_ranges[out_ranges[i].dep_ids[j]].rev_dep_ids[indexes[out_ranges[i].dep_ids[j]]] = i;
+			indexes[out_ranges[i].dep_ids[j]]++;
+		}
+	}
+}
+
 //simple dependency extraction from isobmff:
 //if error returns GF_FALSE, otherwise GF_TRUE
 //if all samples are random access point, ranges is set to NULL and nb_ranges set to 0
@@ -156,15 +180,21 @@ static Bool routein_repair_get_isobmf_deps(const char *seg_name, GF_Blob *blob, 
 	}
 	gf_isom_delete(file);
 
+	routein_repair_get_inverted_isobmf_deps(*out_ranges, *nb_ranges);
+
 #ifndef GPAC_DISABLE_LOG
 	if (gf_log_tool_level_on(GF_LOG_ROUTE, GF_LOG_DEBUG)) {
-		GF_LOG(GF_LOG_DEBUG, GF_LOG_ROUTE, ("[ROUTE] Range dependency for file %s\n", seg_name ? seg_name : szBlobPath));
+		GF_LOG(GF_LOG_DEBUG, GF_LOG_ROUTE, ("[ROUTE] Range dependency/inverted dependency for file %s\n", seg_name ? seg_name : szBlobPath));
 		for (i=0; i<count; i++) {
 			u32 j;
 			SampleRangeDependency *r = &ranges[i];
 			GF_LOG(GF_LOG_DEBUG, GF_LOG_ROUTE, ("\t#%3d size %10u offset %10u ID %2u depends on range IDs", i+1, r->size, r->offset, r->id));
 			for (j=0;j<r->nb_deps;j++) {
 				GF_LOG(GF_LOG_DEBUG, GF_LOG_ROUTE, (" %2u", r->dep_ids[j]));
+			}
+			GF_LOG(GF_LOG_DEBUG, GF_LOG_ROUTE, (", dependencies:"));
+			for (j=0;j<r->nb_rev_deps;j++) {
+				GF_LOG(GF_LOG_DEBUG, GF_LOG_ROUTE, (" %2u", r->rev_dep_ids[j]));
 			}
 			GF_LOG(GF_LOG_DEBUG, GF_LOG_ROUTE, ("\n"));
 		}

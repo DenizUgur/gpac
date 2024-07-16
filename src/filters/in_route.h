@@ -128,6 +128,9 @@ typedef struct __sample_dep
 	//if nb_deps==0, sample is random access
 	s32 nb_deps;
 	u32 *dep_ids;
+	
+	s32 nb_rev_deps;
+	u32 *rev_dep_ids;
 	//0: unknown
 	//1: random access
 	//2: leaf temporal level, discardable right away
