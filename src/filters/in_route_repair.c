@@ -62,7 +62,7 @@ static Bool routein_repair_get_isobmf_deps(const char *seg_name, GF_Blob *blob, 
 {
 	GF_ISOFile *file;
 	u64 BytesMissing;
-	u32 i, count;
+	u32 i;
 	SampleRangeDependency *ranges;
 	char szBlobPath[100];
 	if ((!blob && !seg_name) || !out_ranges || !nb_ranges) return GF_FALSE;
@@ -82,11 +82,18 @@ static Bool routein_repair_get_isobmf_deps(const char *seg_name, GF_Blob *blob, 
 	}
 	s32 max_cts_o = (s32) gf_isom_get_max_sample_cts_offset(file, 1);
 	s32 min_cts_o = gf_isom_get_min_negative_cts_offset(file, 1, GF_ISOM_MIN_NEGCTTS_ANY);
+	u32 ID, nb_refs, count;
+	const u32 *refs;
 
 	count = gf_isom_get_sample_count(file, 1);
-	if (!max_cts_o || !count) {
-		gf_isom_delete(file);
-		return GF_TRUE;
+	if (gf_isom_get_sample_references(file, 1, 1, &ID, &nb_refs, &refs)==GF_OK) {
+		blob->use_sref = GF_TRUE;
+	} else {
+		blob->use_sref = GF_FALSE;
+		if (!max_cts_o || !count) {
+			gf_isom_delete(file);
+			return GF_TRUE;
+		}
 	}
 
 	ranges = gf_malloc(sizeof(SampleRangeDependency)*count);
@@ -95,18 +102,10 @@ static Bool routein_repair_get_isobmf_deps(const char *seg_name, GF_Blob *blob, 
 	*nb_ranges = count;
 
 	GF_ISOSample static_sample;
-	s32 ctso_last_sap = -1;
 	s32 max_ctso = -1;
 	u32 cur_id_sap = 0;
 	u32 cur_id_p = 0;
 	u32 nb_levels=0;
-	u32 ID, nb_refs;
-	const u32 *refs;
-	if (gf_isom_get_sample_references(file, 1, 1, &ID, &nb_refs, &refs)==GF_OK) {
-		blob->use_sref = GF_TRUE;
-	} else {
-		blob->use_sref = GF_FALSE;
-	}
 
 	for (i=0; i<count; i++) {
 		SampleRangeDependency *r = &ranges[i];
@@ -139,7 +138,6 @@ static Bool routein_repair_get_isobmf_deps(const char *seg_name, GF_Blob *blob, 
 		if (min_cts_o<0) cts_offset -= cts_offset;
 
 		if (samp->IsRAP) {
-			ctso_last_sap = cts_offset;
 			max_ctso = -1;
 			cur_id_sap += cur_id_p + nb_levels+1;
 			r->id = cur_id_sap;
