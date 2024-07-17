@@ -991,6 +991,13 @@ static GF_Err routeout_check_service_updates(GF_ROUTEOutCtx *ctx, ROUTEService *
 					media_pid->hld_child_pl_crc = crc;
 					//we need a new TOI since manifest changed
 					media_pid->hls_child_toi = 0;
+					//for route we alternate MAX_INT-1 and MAX_INT-2 and update S-TSID each time
+					//NOTE: ROUTE spec is not really designed for HLS with variant playlist updates
+					//in particular is silent about what happens when FDT-Instance changes during updates
+					//we assume than any file removed from the FDT-nstance by an update is no longer available
+					media_pid->hld_child_pl_version = media_pid->hld_child_pl_version ? 0 : 1;
+					if (!serv->use_flute)
+						serv->needs_reconfig = GF_TRUE;
 
 					if (!media_pid->hld_child_pl_name || strcmp(media_pid->hld_child_pl_name, file_name)) {
 						if (media_pid->hld_child_pl_name) gf_free(media_pid->init_seg_name);
@@ -1363,7 +1370,7 @@ static GF_Err routeout_update_stsid_bundle(GF_ROUTEOutCtx *ctx, ROUTEService *se
 				gf_dynstrcat(&payload_text, temp, NULL);
 			}
 			if (rpid->hld_child_pl_name) {
-				snprintf(temp, 1000, "      <fdt:File Content-Location=\"%s\" TOI=\"%u\"/>\n", rpid->hld_child_pl_name, ROUTE_INIT_TOI - 1);
+				snprintf(temp, 1000, "      <fdt:File Content-Location=\"%s\" TOI=\"%u\"/>\n", rpid->hld_child_pl_name, ROUTE_INIT_TOI - 1 - rpid->hld_child_pl_version);
 				gf_dynstrcat(&payload_text, temp, NULL);
 			}
 			if (rpid->raw_file) {
@@ -1596,7 +1603,7 @@ static void update_error_simulation_state(GF_ROUTEOutCtx *ctx) {
 #undef ERRSIM_ACCURACY
 }
 
-u32 routeout_lct_send(GF_ROUTEOutCtx *ctx, GF_Socket *sock, u32 tsi, u32 toi, u32 codepoint, u8 *payload, u32 len, u32 offset, ROUTEService *serv, u32 total_size, u32 offset_in_frame, u32 fdt_instance_id, Bool is_flute)
+u32 routeout_lct_send(GF_ROUTEOutCtx *ctx, GF_Socket *sock, u32 tsi, u32 toi, u32 codepoint, u8 *payload, u32 len, u32 offset, ROUTEService *serv, u32 total_size, u32 offset_in_frame, u32 fdt_instance_id, Bool is_flute, Bool can_set_close)
 {
 	u32 max_size = ctx->mtu;
 	u32 send_payl_size;
@@ -1636,11 +1643,16 @@ u32 routeout_lct_send(GF_ROUTEOutCtx *ctx, GF_Socket *sock, u32 tsi, u32 toi, u3
 	} else {
 		send_payl_size = len - offset;
 	}
-	ctx->lct_buffer[0] = 0x12; //V=b0001, C=b00, PSI=b10
+	ctx->lct_buffer[0] = 0x10; //V=b0001, C=b00, PSI=b00 or b10 with ROUTE
+	if (!is_flute) ctx->lct_buffer[0] |= 0x02;
 	//S=b1|b0, O=b01|b00, h=b0|b1, res=b00, A=b0, B=X
 	ctx->lct_buffer[1] = short_h ? 0x10 : 0xA0;
-	//set close flag only if total_len is known
-	if (total_size && (offset + send_payl_size == len))
+
+	//Set the close flag (only when total_len is known) only if asked for
+	//Typically:
+	//- carrousel files (raw, manifests, init segments) will never set this as they are resent with the same TOI
+	//- segments will, as they will never be resent
+	if (can_set_close && total_size && (offset + send_payl_size == len))
 		ctx->lct_buffer[1] |= 1;
 
 	ctx->lct_buffer[2] = hdr_len;
@@ -1744,7 +1756,7 @@ static void routeout_send_file(GF_ROUTEOutCtx *ctx, ROUTEService *serv, GF_Socke
 {
 	u32 offset=0;
 	while (offset<size) {
-		offset += routeout_lct_send(ctx, sock, tsi, toi, codepoint, payload, size, offset, serv, size, offset, fdt_instance_id, is_flute);
+		offset += routeout_lct_send(ctx, sock, tsi, toi, codepoint, payload, size, offset, serv, size, offset, fdt_instance_id, is_flute, GF_FALSE);
 	}
 }
 
@@ -2078,6 +2090,7 @@ retry:
 			rpid->clock_at_frame_start = ctx->clock;
 			rpid->cts_us_at_frame_start = rpid->current_cts_us;
 			rpid->cts_at_frame_start = ts;
+			GF_LOG(GF_LOG_DEBUG, GF_LOG_ROUTE, ("[%s] Segment %s init send time to "LLU" CTS "LLU" us source TS "LLU"/%u\n", rpid->route->log_name, rpid->seg_name, rpid->cts_us_at_frame_start, rpid->current_cts_us, ts, rpid->timescale));
 		}
 
 		rpid->current_dur_us = pck_dur;
@@ -2255,12 +2268,13 @@ next_packet:
 		if (send_hls_child && rpid->hld_child_pl) {
 			u32 hls_len = (u32) strlen(rpid->hld_child_pl);
 			GF_LOG(GF_LOG_INFO, GF_LOG_ROUTE, ("[%s] Sending HLS sub playlist %s\n", rpid->route->log_name, rpid->hld_child_pl_name));
+			GF_LOG(GF_LOG_DEBUG, GF_LOG_ROUTE, ("[%s] HLS sub playlist content:\n%s\n", rpid->route->log_name, rpid->hld_child_pl));
 
 			if (serv->use_flute) {
 				routeout_send_file(ctx, serv, ctx->sock_dvb_mabr, ctx->dvb_mabr_tsi, rpid->hls_child_toi, rpid->hld_child_pl, hls_len, 0, 0, GF_TRUE);
 			} else {
 				//we use codepoint 1 (NRT - file mode) for subplaylists
-				routeout_send_file(ctx, serv, rpid->rlct->sock, rpid->tsi, ROUTE_INIT_TOI-1, rpid->hld_child_pl, hls_len, 1, 0, GF_FALSE);
+				routeout_send_file(ctx, serv, rpid->rlct->sock, rpid->tsi, ROUTE_INIT_TOI-1-rpid->hld_child_pl_version, rpid->hld_child_pl, hls_len, 1, 0, GF_FALSE);
 			}
 
 			if (ctx->reporting_on) {
@@ -2310,9 +2324,9 @@ next_packet:
 			codepoint = rpid->raw_file ? rpid->fmtp : 8;
 			//ll mode in flute, each packet is sent as an object so use packet offset instead of file offset
 			if (ctx->dvb_mabr && ctx->llmode) {
-				sent = routeout_lct_send(ctx, rpid->rlct->sock, rpid->tsi, rpid->current_toi, codepoint, (u8 *) rpid->pck_data, rpid->pck_size, rpid->pck_offset, serv, rpid->pck_size, rpid->pck_offset, 0, serv->use_flute);
+				sent = routeout_lct_send(ctx, rpid->rlct->sock, rpid->tsi, rpid->current_toi, codepoint, (u8 *) rpid->pck_data, rpid->pck_size, rpid->pck_offset, serv, rpid->pck_size, rpid->pck_offset, 0, serv->use_flute, GF_TRUE);
 			} else {
-				sent = routeout_lct_send(ctx, rpid->rlct->sock, rpid->tsi, rpid->current_toi, codepoint, (u8 *) rpid->pck_data, rpid->pck_size, rpid->pck_offset, serv, rpid->full_frame_size, rpid->pck_offset + rpid->frag_offset, 0, serv->use_flute);
+				sent = routeout_lct_send(ctx, rpid->rlct->sock, rpid->tsi, rpid->current_toi, codepoint, (u8 *) rpid->pck_data, rpid->pck_size, rpid->pck_offset, serv, rpid->full_frame_size, rpid->pck_offset + rpid->frag_offset, 0, serv->use_flute, GF_TRUE);
 			}
 			rpid->pck_offset += sent;
 			if (ctx->reporting_on) {
@@ -2363,7 +2377,7 @@ next_packet:
 					}
 					//otherwise we've been pushing too slowly
 					else if (ctx->clock > 1000 + seg_clock) {
-						GF_LOG(GF_LOG_INFO, GF_LOG_ROUTE, ("[%s] Segment %s pushed too late by "LLU" us\n", rpid->route->log_name, rpid->seg_name, ctx->clock - seg_clock));
+						GF_LOG(GF_LOG_INFO, GF_LOG_ROUTE, ("[%s] Segment %s pushed too late by "LLU" us (target push duration %u us)\n", rpid->route->log_name, rpid->seg_name, ctx->clock - seg_clock, target_push_dur));
 					}
 
 					if (rpid->pck_dur_at_frame_start && ctx->llmode) {
@@ -2564,13 +2578,10 @@ static void routeout_update_mabr_manifest(GF_ROUTEOutCtx *ctx)
 	u32 i, count;
 	if (ctx->dvb_mabr_config) return;
 
-	const char *src_ip;
-	char szIP[GF_MAX_IP_NAME_LEN];
-	src_ip = ctx->ifce;
-	if (!src_ip) {
-		if (gf_sk_get_local_ip(ctx->sock_dvb_mabr, szIP) != GF_OK)
-			strcpy(szIP, "127.0.0.1");
-		src_ip = szIP;
+	char szHost[GF_MAX_IP_NAME_LEN];
+	if (gf_sk_get_host_name(szHost) != GF_OK) {
+		GF_LOG(GF_LOG_WARNING, GF_LOG_ROUTE, ("Cannot get host name, using 127.0.0.1\n"));
+		strcpy(szHost, "127.0.0.1");
 	}
 
 	count = gf_list_count(ctx->services);
@@ -2595,7 +2606,7 @@ static void routeout_update_mabr_manifest(GF_ROUTEOutCtx *ctx)
 		gf_dynstrcat(&payload_text, "\" protocolVersion=\"1\"/>\n", NULL);
 		gf_dynstrcat(&payload_text, "<EndpointAddress>\n<NetworkSourceAddress>", NULL);
 
-		gf_dynstrcat(&payload_text, src_ip, NULL);
+		gf_dynstrcat(&payload_text, szHost, NULL);
 		gf_dynstrcat(&payload_text, "</NetworkSourceAddress>\n<NetworkDestinationGroupAddress>", NULL);
 		//- for FLUTE we use the main port to deliver FDT, manifests and init - we could split by service as done for ROUTE
 		//- for ROUTE we must send the STSID, on the session port
@@ -2702,7 +2713,7 @@ static void routeout_update_mabr_manifest(GF_ROUTEOutCtx *ctx)
 			}
 			gf_dynstrcat(&payload_text, "<EndpointAddress>\n<NetworkSourceAddress>", NULL);
 
-			gf_dynstrcat(&payload_text, src_ip, NULL);
+			gf_dynstrcat(&payload_text, szHost, NULL);
 			gf_dynstrcat(&payload_text, "</NetworkSourceAddress>\n<NetworkDestinationGroupAddress>", NULL);
 			gf_dynstrcat(&payload_text, rpid->rlct->ip, NULL);
 			gf_dynstrcat(&payload_text, "</NetworkDestinationGroupAddress>\n<TransportDestinationPort>", NULL);
@@ -2986,7 +2997,7 @@ static const GF_FilterArgs ROUTEOutArgs[] =
 		"- no: do not send checksum\n"
 		"- meta: only send checksum for configuration files, manifests and init segments\n"
 		"- all: send checksum for everything", GF_PROP_UINT, "meta", "no|meta|all", 0},
-	{ OFFS(recv_obj_timeout), "timeout period in ms before resorting to unicast repair", GF_PROP_UINT, "50", NULL, 0},
+	{ OFFS(recv_obj_timeout), "set timeout period in ms before client resorts to unicast repair", GF_PROP_UINT, "50", NULL, 0},
 	{ OFFS(errsim), "simulate errors using a 2-state Markov chain. Value are percentages", GF_PROP_VEC2, "0.0x100.0", NULL, 0},
 	{0}
 };
