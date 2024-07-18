@@ -436,7 +436,7 @@ static void routein_repair_segment_isobmf_local(ROUTEInCtx *ctx, u32 service_id,
 	gf_route_dmx_patch_frag_info(ctx->route_dmx, service_id, finfo, 0, size);
 }
 
-static Bool does_belong(GF_LCTFragInfo *frags, u32 nb_frags, u32 start, u32 size) {
+static Bool route_repair_is_range_completely_received(GF_LCTFragInfo *frags, u32 nb_frags, u32 start, u32 size) {
 	// check if intervale [start, start+size[ belongs to frags list of intervales
 	u32 i;
 	if(start > GF_UINT_MAX - size) return GF_FALSE;
@@ -456,7 +456,7 @@ static void route_repair_build_ranges_isobmf(ROUTEInCtx *ctx, RepairSegmentInfo 
 
 	while(pos+8 <= finfo->total_size) { // if
 
-		if(!does_belong(finfo->frags, finfo->nb_frags, pos, 8)) {
+		if(!route_repair_is_range_completely_received(finfo->frags, finfo->nb_frags, pos, 8)) {
 			RouteRepairRange *rr = gf_list_pop_back(ctx->seg_range_reservoir);
 			if (!rr) {
 				GF_SAFEALLOC(rr, RouteRepairRange);
@@ -484,7 +484,7 @@ static void route_repair_build_ranges_isobmf(ROUTEInCtx *ctx, RepairSegmentInfo 
 				return;
 			}
 			if ((box_type != GF_4CC('m', 'd', 'a', 't')) && (box_type != GF_4CC('i', 'd', 'a', 't'))) {
-				if(!does_belong(finfo->frags, finfo->nb_frags, pos, box_size)) {
+				if(!route_repair_is_range_completely_received(finfo->frags, finfo->nb_frags, pos, box_size)) {
 					RouteRepairRange *rr = gf_list_pop_back(ctx->seg_range_reservoir);
 					if (!rr) {
 						GF_SAFEALLOC(rr, RouteRepairRange);
