@@ -672,6 +672,7 @@ static void routein_delete_range_deps(SampleRangeDependency *srd, u32 nb_ranges)
 	u32 i;
 	for (i=0; i<nb_ranges; i++) {
 		if (srd[i].dep_ids) gf_free(srd[i].dep_ids);
+		if (srd[i].rev_dep_ids) gf_free(srd[i].rev_dep_ids);
 	}
 	gf_free(srd);
 }
