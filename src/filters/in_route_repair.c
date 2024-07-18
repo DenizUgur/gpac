@@ -33,6 +33,7 @@ static void routein_repair_get_inverted_isobmf_deps(SampleRangeDependency *out_r
 	u32 i, j;
 
 	u32 indexes[nb_ranges];
+	memset(indexes, 0, nb_ranges* sizeof(int));
 
 	for(i=0; i < nb_ranges; i++) {
 		for(j=0; j < out_ranges[i].nb_deps; j++) {
@@ -42,7 +43,6 @@ static void routein_repair_get_inverted_isobmf_deps(SampleRangeDependency *out_r
 	
 	for(i=0; i < nb_ranges; i++) {
 		out_ranges[i].rev_dep_ids = gf_malloc(sizeof(u32) * out_ranges[i].nb_rev_deps);
-		indexes[i] = 0;
 	}
 
 	for(i=0; i < nb_ranges; i++) {
