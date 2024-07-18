@@ -515,7 +515,8 @@ static void route_repair_build_ranges_isobmf(ROUTEInCtx *ctx, RepairSegmentInfo 
 
 static void routein_repair_get_costs(RepairSegmentInfo *rsi, SampleRangeDependency *r, u32 threshold, u32 *nb_bytes, u32 *nb_requests) {
 // add byte ranges to "rsi->ranges" for repair
-	nb_requests = 0;
+	*nb_requests = 0;
+	*nb_bytes = 0;
 	u32 last_br_end = 0, last_br_start = 0;
 	u32 i;
 
@@ -546,9 +547,9 @@ static void routein_repair_get_costs(RepairSegmentInfo *rsi, SampleRangeDependen
 			if(last_br_start < last_br_end && br_start - last_br_end < threshold) {
 				last_br_end = br_end;
 			} else {
-				nb_bytes += last_br_end - last_br_start;
+				*nb_bytes += last_br_end - last_br_start;
 
-				nb_requests++;
+				(*nb_requests)++;
 				last_br_start = MAX(r->offset, br_start);
 				last_br_end = MIN(r->offset + r->size, br_end);
 			}
@@ -558,7 +559,7 @@ static void routein_repair_get_costs(RepairSegmentInfo *rsi, SampleRangeDependen
 			break;
 		}
 	}
-	nb_bytes += last_br_end - last_br_start;
+	*nb_bytes += last_br_end - last_br_start;
 }
 
 static u32 routein_repair_isobmf_frames(ROUTEInCtx *ctx, RepairSegmentInfo *rsi, SampleRangeDependency *r, u32 threshold) {
@@ -626,6 +627,12 @@ static u32 routein_repair_isobmf_frames(ROUTEInCtx *ctx, RepairSegmentInfo *rsi,
 		gf_list_add(rsi->ranges, rr);
 		GF_LOG(GF_LOG_INFO, GF_LOG_ROUTE, ("[REPAIR] Repair (TSI=%u, TOI=%u) frame ID #%3u: adding range [%u, %u[ for repair\n", rsi->finfo.tsi, rsi->finfo.toi, r->id, rr->br_start, rr->br_end));
 	}
+
+#ifndef GPAC_DISABLE_LOG
+	u32 bytes=0, reqs=0;
+	routein_repair_get_costs(rsi, r, threshold, &bytes, &reqs);
+	GF_LOG(GF_LOG_DEBUG, GF_LOG_ROUTE, ("[REPAIR] Repair (TSI=%u, TOI=%u) Frame #%3u - Costs in number of bytes: %10u; number of reqs: %4u \n", rsi->finfo.tsi, rsi->finfo.toi, r->id, bytes, reqs));
+#endif
 
 	return nb_rr;
 }
