@@ -634,34 +634,31 @@ static void route_repair_topological_sort_samples(SampleRangeDependency srd[], u
 	
 	s32 i;
 	u32 j;
-	s32 sort_i = nb_ranges-1;
+	s32 sort_i = 0;
 	
-	int outgoings[nb_ranges];
+	int incoming[nb_ranges];
 
-	//for each sample, count number of outgoing deps
 	for(i=0; i < nb_ranges; i++) {
-		for(j=0; j < srd[i].nb_deps; j++) {
-			outgoings[srd[i].dep_ids[j]-1]++;
-		}
+		incoming[i] = srd[i].nb_deps;
 	}
 
 	//Kahn's algorithm for toological sort
 	//add leaves samples at the end of sorted_samples
 	for(i=0; i < nb_ranges; i++) {
-		if(outgoings[i] == 0) {
+		if(incoming[i] == 0) {
 			sorted_samples[sort_i] = &srd[i];
-			sort_i--;
+			sort_i++;
 		}
 	}
 	
-	for(i=nb_ranges-1; i >= 0; i--) {
-		for(j=0; j < srd[i].nb_deps; j++) {
-			u32 sample_i = srd[i].dep_ids[j]-1;
+	for(i=0; i < nb_ranges; i++) {
+		for(j=0; j < srd[i].nb_rev_deps; j++) {
+			u32 sample_i = srd[i].rev_dep_ids[j];
 
-			outgoings[sample_i]--;
-			if(outgoings[sample_i] == 0) {
+			incoming[sample_i]--;
+			if(incoming[sample_i] == 0) {
 				sorted_samples[sort_i] = &srd[sample_i];
-				sort_i--;
+				sort_i++;
 			}
 		}
 	}
