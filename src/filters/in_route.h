@@ -135,8 +135,6 @@ typedef struct __sample_dep
 	//1: random access
 	//2: leaf temporal level, discardable right away
 	u8 type;
-	//used in sort algorithm
-	u8 mark;
 } SampleRangeDependency;
 
 struct _route_repair_seg_info
