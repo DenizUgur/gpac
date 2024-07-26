@@ -194,7 +194,7 @@ static Bool routein_repair_get_isobmf_deps(const char *seg_name, GF_Blob *blob, 
 			for (j=0;j<r->nb_deps;j++) {
 				GF_LOG(GF_LOG_DEBUG, GF_LOG_ROUTE, (" %2u", r->dep_ids[j]));
 			}
-			GF_LOG(GF_LOG_DEBUG, GF_LOG_ROUTE, (", dependencies:"));
+			GF_LOG(GF_LOG_DEBUG, GF_LOG_ROUTE, ("; dependant frames:"));
 			for (j=0;j<r->nb_rev_deps;j++) {
 				GF_LOG(GF_LOG_DEBUG, GF_LOG_ROUTE, (" %2u", r->rev_dep_ids[j]));
 			}
