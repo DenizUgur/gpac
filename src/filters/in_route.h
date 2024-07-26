@@ -64,6 +64,8 @@ typedef struct
 	u32 br_end;
 	u32 done;
 	u32 priority;
+	//id of simple in the list of simples; -1 if not used
+	s32 sample_id;
 } RouteRepairRange;
 
 
@@ -135,6 +137,12 @@ typedef struct __sample_dep
 	//1: random access
 	//2: leaf temporal level, discardable right away
 	u8 type;
+	//repair costs in terms of number of bytes and network requests
+	u32 bytes_cost;
+	u32 reqs_cost;
+
+	u32 total_bytes_cost;
+	u32 total_reqs_cost;
 } SampleRangeDependency;
 
 struct _route_repair_seg_info
@@ -152,6 +160,8 @@ struct _route_repair_seg_info
 
 	u32 state; //doing top-level boxes (except mdat; header only) or repairing level 0, level 1, 
 	SampleRangeDependency* srd; // valid once all top headers moof are ok (array of frames)
+	u32 nb_ranges; // number of sample ranges in srd; 0 if srd is not valid
+
 	u32 last_pos_repair_top_level; 
 };
 

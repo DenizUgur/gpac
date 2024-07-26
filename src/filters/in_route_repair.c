@@ -117,6 +117,10 @@ static Bool routein_repair_get_isobmf_deps(const char *seg_name, GF_Blob *blob, 
 		r->size = samp->dataLength;
 		r->offset = (u32) offset;
 
+		// initialize costs
+		r->bytes_cost = 0;
+		r->reqs_cost = 0;
+
 		if (blob->use_sref) {
 			gf_isom_get_sample_references(file, 1, i+1, &r->id, &r->nb_deps, &refs);
 			if (r->id==0xFFFFFFFF) {
@@ -470,6 +474,7 @@ static void route_repair_build_ranges_isobmf(ROUTEInCtx *ctx, RepairSegmentInfo 
 
 			rr->br_start = pos;
 			rr->br_end = MIN(finfo->total_size, pos + min_size);
+			rr->sample_id = -1;
 
 			GF_LOG(GF_LOG_INFO, GF_LOG_ROUTE, ("[REPAIR] Repair top_level boxes: adding range [%u, %u[ for repair\n", rr->br_start, rr->br_end));
 
@@ -500,6 +505,7 @@ static void route_repair_build_ranges_isobmf(ROUTEInCtx *ctx, RepairSegmentInfo 
 
 					rr->br_start = pos;
 					rr->br_end = MIN(finfo->total_size, MAX(pos + box_size, pos + min_size));
+					rr->sample_id = -1;
 
 					GF_LOG(GF_LOG_INFO, GF_LOG_ROUTE, ("[REPAIR] Repair top_level boxes: adding range [%u, %u[ for repair\n", rr->br_start, rr->br_end));
 
@@ -562,11 +568,50 @@ static void routein_repair_get_costs(RepairSegmentInfo *rsi, SampleRangeDependen
 	*nb_bytes += last_br_end - last_br_start;
 }
 
-static u32 routein_repair_isobmf_frames(ROUTEInCtx *ctx, RepairSegmentInfo *rsi, SampleRangeDependency *r, u32 threshold) {
+static void routein_repair_propagate_costs_rec(RepairSegmentInfo *rsi, s32 bytes_cost, s32 reqs_cost, u32 index, Bool visited[]) {
+	u32 i;
+	if(visited[index]) return;
+
+	rsi->srd[index].total_bytes_cost += bytes_cost;
+	rsi->srd[index].total_reqs_cost += reqs_cost; 
+	visited[index] = GF_TRUE;
+
+	for(i=0; i < rsi->srd[index].nb_rev_deps; i++) {
+		routein_repair_propagate_costs_rec(rsi, bytes_cost, reqs_cost, rsi->srd[index].rev_dep_ids[i], visited);
+	}
+}
+
+static void routein_repair_propagate_costs(RepairSegmentInfo *rsi, s32 bytes_cost, s32 reqs_cost, u32 index) {
+	Bool visited[rsi->nb_ranges];
+	memset(visited, GF_FALSE, rsi->nb_ranges*sizeof(Bool));
+
+	routein_repair_propagate_costs_rec(rsi, bytes_cost, reqs_cost, index, visited);
+}
+
+static void routein_repair_compute_entire_all_costs(RepairSegmentInfo *rsi, u32 threshold) {
+	u32 i, nb_bytes=0, nb_reqs=0;
+	Bool visited[rsi->nb_ranges];
+
+	//use the principle of propagation to compute the real costs !
+	for(i=0; i < rsi->nb_ranges; i++) {
+		routein_repair_get_costs(rsi, &rsi->srd[i], threshold, &nb_bytes, &nb_reqs);
+
+		rsi->srd[i].bytes_cost = nb_bytes;
+		rsi->srd[i].reqs_cost = nb_reqs;
+
+		if(nb_bytes > 0 && nb_reqs > 0) {
+			memset(visited, GF_FALSE, rsi->nb_ranges*sizeof(Bool));
+			routein_repair_propagate_costs(rsi, nb_bytes, nb_reqs, i);
+		}
+	}
+}
+
+static u32 routein_repair_isobmf_frames(ROUTEInCtx *ctx, RepairSegmentInfo *rsi, u32 index, u32 threshold) {
 	// add byte ranges to "rsi->ranges" for repair
 	u32 nb_rr = 0;
 	u32 i;
 	RouteRepairRange *rr = NULL;
+	SampleRangeDependency *r = &rsi->srd[index];
 
 	for (i=0; i<=rsi->finfo.nb_frags; i++) {
 		u32 br_start = 0, br_end = 0;
@@ -614,6 +659,7 @@ static u32 routein_repair_isobmf_frames(ROUTEInCtx *ctx, RepairSegmentInfo *rsi,
 
 				rr->br_start = MAX(r->offset, br_start);
 				rr->br_end = MIN(r->offset + r->size, br_end);
+				rr->sample_id = index;
 			}
 		}
 		//byte range is after sample range
@@ -731,6 +777,7 @@ static void route_repair_build_ranges_full(ROUTEInCtx *ctx, RepairSegmentInfo *r
 		}
 		rr->br_start = br_start;
 		rr->br_end = br_end;
+		rr->sample_id = -1;
 
 		gf_list_add(rsi->ranges, rr);
 	}
@@ -738,11 +785,10 @@ static void route_repair_build_ranges_full(ROUTEInCtx *ctx, RepairSegmentInfo *r
 }
 
 static void route_repair_isobmf_mdat_box(ROUTEInCtx *ctx, RepairSegmentInfo *rsi) {
-	u32 nb_ranges, i;
-	u32 threshold = 1024;
+	u32 threshold = 1024, i;
 	
-	routein_repair_get_isobmf_deps(rsi->finfo.filename, rsi->finfo.blob, &rsi->srd, &nb_ranges);
-	if(! nb_ranges) {
+	routein_repair_get_isobmf_deps(rsi->finfo.filename, rsi->finfo.blob, &rsi->srd, &rsi->nb_ranges);
+	if(! rsi->nb_ranges) {
 		GF_LOG(GF_LOG_WARNING, GF_LOG_ROUTE, ("[REPAIR] All samples have the same dependency level in \"%s\", switching to full repair \n", rsi->finfo.filename));
 		route_repair_build_ranges_full(ctx, rsi, &rsi->finfo);
 		return;
@@ -754,17 +800,24 @@ static void route_repair_isobmf_mdat_box(ROUTEInCtx *ctx, RepairSegmentInfo *rsi
 		return;
 	}
 
-	SampleRangeDependency* sorted_samples[nb_ranges];
+	// computes costs
+	routein_repair_compute_entire_all_costs(rsi, threshold);
 
-	route_repair_topological_sort_samples(rsi->srd, nb_ranges, sorted_samples);
-
-	for(i=0; i<nb_ranges; i++) {
-		SampleRangeDependency *r = sorted_samples[i];
-		routein_repair_isobmf_frames(ctx, rsi, r, threshold);
+	for(i=0; i < rsi->nb_ranges; i++) {
+		GF_LOG(GF_LOG_INFO, GF_LOG_ROUTE, ("[REPAIR] Frame ID #%3u: %6d bytes & %3d requests \n", rsi->srd[i].id, rsi->srd[i].bytes_cost, rsi->srd[i].reqs_cost));
 	}
 
-	routein_delete_range_deps(rsi->srd, nb_ranges);
+	SampleRangeDependency* sorted_samples[rsi->nb_ranges];
+
+	route_repair_topological_sort_samples(rsi->srd, rsi->nb_ranges, sorted_samples);
+
+	for(i=0; i<rsi->nb_ranges; i++) {
+		routein_repair_isobmf_frames(ctx, rsi, i, threshold);
+	}
+
+	routein_delete_range_deps(rsi->srd, rsi->nb_ranges);
 	rsi->srd = NULL;
+	rsi->nb_ranges = 0;
 }
 
 void routein_queue_repair(ROUTEInCtx *ctx, GF_ROUTEEventType evt, u32 evt_param, GF_ROUTEEventFileInfo *finfo)
@@ -897,10 +950,20 @@ static void repair_session_done(ROUTEInCtx *ctx, RouteRepairSession *rsess, GF_E
 	//notify routedmx we have received a byte range
 	if (!rsi->removed) {
 		gf_route_dmx_patch_frag_info(ctx->route_dmx, rsi->service_id, &rsi->finfo, rsess->range->br_start, rsess->range->br_start + rsess->range->done);
+		u32 index = rsess->range->sample_id;
+		u32 req = 0;
+
 		if(rsess->range->br_end == rsess->range->br_start + rsess->range->done) {
 			GF_LOG(GF_LOG_INFO, GF_LOG_ROUTE, ("[REPAIR] Successfully repaired data interval [%u, %u[ of object (TSI=%u, TOI=%u) \n", rsess->range->br_start, rsess->range->br_end, rsi->finfo.tsi, rsi->finfo.toi));
+			req = 1;
 		} else {
 			GF_LOG(GF_LOG_INFO, GF_LOG_ROUTE, ("[REPAIR] Failed to repair entire data interval [%u, %u[ of object (TSI=%u, TOI=%u). Only sub-interval [%u, %u[ was received.. \n", rsess->range->br_start, rsess->range->br_end, rsi->finfo.tsi, rsi->finfo.toi, rsess->range->br_start, rsess->range->br_start+rsess->range->done));
+		}
+
+		if(index >= 0) {
+			rsi->srd[index].reqs_cost -= req;
+			rsi->srd[index].bytes_cost -= rsess->range->done;
+			routein_repair_propagate_costs(rsi, - rsess->range->done, -req, index);
 		}
 	}
 
