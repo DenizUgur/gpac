@@ -814,10 +814,6 @@ static void route_repair_isobmf_mdat_box(ROUTEInCtx *ctx, RepairSegmentInfo *rsi
 	for(i=0; i<rsi->nb_ranges; i++) {
 		routein_repair_isobmf_frames(ctx, rsi, i, threshold);
 	}
-
-	routein_delete_range_deps(rsi->srd, rsi->nb_ranges);
-	rsi->srd = NULL;
-	rsi->nb_ranges = 0;
 }
 
 void routein_queue_repair(ROUTEInCtx *ctx, GF_ROUTEEventType evt, u32 evt_param, GF_ROUTEEventFileInfo *finfo)
@@ -1005,6 +1001,7 @@ static void repair_session_done(ROUTEInCtx *ctx, RouteRepairSession *rsess, GF_E
 		routein_on_event_file(ctx, rsi->evt, rsi->service_id, &rsi->finfo, GF_TRUE, GF_FALSE);
 	}
 
+	routein_delete_range_deps(rsi->srd, rsi->nb_ranges);
 	gf_list_del_item(ctx->seg_repair_queue, rsi);
 	GF_List *bck = rsi->ranges;
 	if (rsi->filename) gf_free(rsi->filename);
